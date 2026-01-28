@@ -16,29 +16,100 @@
         <button id="refreshBtn" class="btn btn-primary">Refresh</button>
       </div>
 
-      <div class="card shadow-sm">
-        <div class="card-body">
-          <div class="table-responsive">
-            <table class="table table-striped align-middle">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Recipient</th>
-                  <th>Status</th>
-                  <th>Retry Count</th>
-                </tr>
-              </thead>
-              <tbody id="jobsTable"></tbody>
-            </table>
+      <div class="row g-3">
+        <div class="col-lg-8">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <div class="table-responsive">
+                <table class="table table-striped align-middle">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Recipient</th>
+                      <th>Status</th>
+                      <th>Retry Count</th>
+                    </tr>
+                  </thead>
+                  <tbody id="jobsTable"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="card shadow-sm h-100">
+            <div class="card-body">
+              <h2 class="h6 text-uppercase text-muted">New Notification</h2>
+              <p class="text-muted small mb-3">
+                Send a notification to the ingestion API. Fields align with the backend payload.
+              </p>
+              <form id="notifyForm" class="d-grid gap-2">
+                <div>
+                  <label class="form-label" for="clientId">Client ID</label>
+                  <input
+                    id="clientId"
+                    name="clientId"
+                    type="text"
+                    class="form-control"
+                    placeholder="acme-web"
+                    required
+                  />
+                </div>
+                <div>
+                  <label class="form-label" for="recipient">Recipient</label>
+                  <input
+                    id="recipient"
+                    name="recipient"
+                    type="email"
+                    class="form-control"
+                    placeholder="user@example.com"
+                    required
+                  />
+                </div>
+                <div>
+                  <label class="form-label" for="message">Message</label>
+                  <textarea
+                    id="message"
+                    name="message"
+                    class="form-control"
+                    rows="4"
+                    placeholder="Short message"
+                    required
+                  ></textarea>
+                </div>
+                <button id="submitBtn" type="submit" class="btn btn-success">
+                  Send Notification
+                </button>
+                <div id="formAlert" class="alert d-none mb-0" role="alert"></div>
+              </form>
+              <p class="small text-muted mt-3 mb-0">
+                Tip: append <code>?apiBase=https://your-domain</code> or
+                <code>?jobsBase=https://your-domain</code> when running behind a proxy.
+              </p>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <script>
-      const API_URL = "http://localhost:8081/api/v1/jobs";
+      const DEFAULT_API_BASE = "http://localhost:8080";
+      const DEFAULT_JOBS_BASE = "http://localhost:8081";
+      const queryParams = new URLSearchParams(window.location.search);
+      const apiBaseOverride = queryParams.get("apiBase") || window.SNF_API_BASE;
+      const jobsBaseOverride = queryParams.get("jobsBase") || window.SNF_JOBS_BASE;
+      const API_BASE = apiBaseOverride || DEFAULT_API_BASE;
+      const JOBS_BASE =
+        jobsBaseOverride ||
+        (API_BASE === DEFAULT_API_BASE ? DEFAULT_JOBS_BASE : API_BASE);
+      const INGESTION_URL = `${API_BASE.replace(/\/$/, "")}/api/v1/notify`;
+      const JOBS_URL = `${JOBS_BASE.replace(/\/$/, "")}/api/v1/jobs`;
+
       const tableBody = document.getElementById("jobsTable");
       const refreshBtn = document.getElementById("refreshBtn");
+      const notifyForm = document.getElementById("notifyForm");
+      const submitBtn = document.getElementById("submitBtn");
+      const formAlert = document.getElementById("formAlert");
 
       function statusBadge(status) {
         const normalized = (status || "").toUpperCase();
@@ -51,9 +122,14 @@
         return `<span class="badge text-bg-secondary">${normalized || "UNKNOWN"}</span>`;
       }
 
+      function showFormAlert(message, type) {
+        formAlert.textContent = message;
+        formAlert.className = `alert alert-${type} mb-0`;
+      }
+
       async function loadJobs() {
         try {
-          const res = await fetch(API_URL);
+          const res = await fetch(JOBS_URL);
           const jobs = await res.json();
           tableBody.innerHTML = jobs
             .map(
@@ -75,6 +151,39 @@
           `;
         }
       }
+
+      notifyForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(notifyForm);
+        const payload = {
+          clientId: formData.get("clientId")?.trim(),
+          recipient: formData.get("recipient")?.trim(),
+          message: formData.get("message")?.trim(),
+        };
+
+        submitBtn.disabled = true;
+        showFormAlert("Sending notification...", "info");
+
+        try {
+          const response = await fetch(INGESTION_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Request failed with ${response.status}`);
+          }
+
+          showFormAlert("Notification accepted. Tracking job status...", "success");
+          notifyForm.reset();
+          loadJobs();
+        } catch (err) {
+          showFormAlert("Failed to submit notification. Check API URL and try again.", "danger");
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
 
       refreshBtn.addEventListener("click", loadJobs);
       loadJobs();
