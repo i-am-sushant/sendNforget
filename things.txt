@@ -1,0 +1,104 @@
+The Feature: API Rate Limiting
+
+    The Goal: Prevent a single client (clientId) from sending more than 5 requests per minute.
+
+    The Logic:
+
+        When a request comes in, check Redis for key rate_limit:{clientId}.
+
+        If the value > 5, Reject with 429 Too Many Requests.
+
+        If not, increment the counter and let it pass.
+
+
+
+
+
+
+
+        1. Idempotency (The "Double-Click" Protection)
+
+    The Problem: A user accidentally double-clicks the "Send" button. Your system currently sends two emails.
+
+    The Fix: You require a unique requestId from the client. If you see that ID again within 24 hours, you ignore it.
+
+    Tech: Redis. Store requestId keys with a Time-To-Live (TTL).
+
+
+
+
+
+    Priority Lanes (VIP Treatment)
+
+    The Problem: A "Password Reset" email (Critical) gets stuck behind 5,000 "Marketing Newsletters" (Low Priority) in the queue.
+
+    The Fix: Add a priority: HIGH flag. RabbitMQ supports priority queues out of the box!
+
+    Tech: RabbitMQ. Just change the Queue configuration.
+
+
+
+
+
+    Search & Filter (Admin Power)
+
+    The Problem: Your dashboard shows every job. It’s hard to find "that one failed email."
+
+    The Fix: Add a search bar to your dashboard to find jobs by recipient or status.
+
+    Tech: Postgres / JPA. A simple findByRecipientContaining query.
+
+
+
+
+
+    Option 1: The "Enterprise" Path (Real Emails)
+
+Best for the TCS Interview narrative. 
+You connect your worker to Gmail's SMTP
+ server. When you send a JSON request, 
+ an actual email lands in your inbox 2 
+ seconds later.
+
+
+
+
+
+
+
+ Suggestions to make it concrete:
+
+- Add a real delivery channel (email via SMTP, SMS via Twilio, push via FCM).
+- Persist full request payload and delivery result (provider response, error codes).
+- Add “notification type” and “template” support.
+- Implement a dead‑letter queue and a retry backoff policy per channel.
+- Add a status endpoint per `trackingId` with delivery timeline.
+- Add auth (API key or JWT) on ingestion.
+- Add rate limiting per `clientId`.
+- Add metrics/logging (Prometheus + Grafana).
+- Add a web UI to create/send notifications and view status history.
+
+Tell me which 1–2 you want, and I’ll implement them.
+
+
+
+
+
+
+
+
+Easiest (low effort, no external accounts):
+- Persist full request payload + result fields.
+- Add status by `trackingId`.
+- Add notification “type” + simple templating.
+- Add DLQ with simple routing (no provider).
+
+Medium (some setup):
+- Auth with API key.
+- Rate limiting per `clientId`.
+
+Harder (external setup):
+- Real email/SMS/push delivery.
+- Metrics stack (Prometheus/Grafana).
+
+Pick 1–2 and I’ll implement.

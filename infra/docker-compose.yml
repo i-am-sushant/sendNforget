@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: snf-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: sendnforget
+    volumes:
+      - snf_pg_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: snf-rabbitmq
+    ports:
+      - "7673:5672"
+      - "17673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  redis:
+    image: redis:7
+    container_name: snf-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  snf_pg_data:
