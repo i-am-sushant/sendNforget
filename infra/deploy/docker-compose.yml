@@ -15,7 +15,7 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
 
   ingestion-service:
-    image: ghcr.io/${GHCR_REPOSITORY}-ingestion-service:latest
+    image: ghcr.io/${GHCR_REPOSITORY}-ingestion-service:main
     depends_on:
       - rabbitmq
     ports:
@@ -25,7 +25,7 @@ services:
       SPRING_RABBITMQ_PORT: 5672
 
   worker-service:
-    image: ghcr.io/${GHCR_REPOSITORY}-worker-service:latest
+    image: ghcr.io/${GHCR_REPOSITORY}-worker-service:main
     depends_on:
       - postgres
       - rabbitmq
