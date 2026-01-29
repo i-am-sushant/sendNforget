@@ -17,7 +17,11 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1")
 @CrossOrigin(
-    origins = {"http://localhost:5500", "http://127.0.0.1:5500"},
+    origins = {
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        "https://sendnforget.sushantmishra.me"
+    },
     allowedHeaders = "*",
     methods = {org.springframework.web.bind.annotation.RequestMethod.POST, org.springframework.web.bind.annotation.RequestMethod.OPTIONS}
 )
