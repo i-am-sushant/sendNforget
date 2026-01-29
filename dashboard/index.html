@@ -82,10 +82,12 @@
                 </button>
                 <div id="formAlert" class="alert d-none mb-0" role="alert"></div>
               </form>
+              <!--
               <p class="small text-muted mt-3 mb-0">
                 Tip: append <code>?apiBase=https://your-domain</code> or
                 <code>?jobsBase=https://your-domain</code> when running behind a proxy.
               </p>
+              -->
             </div>
           </div>
         </div>
@@ -93,15 +95,15 @@
     </div>
 
     <script>
-      // Auto-detect base URL: use current origin in production, localhost in development
-      const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-      const DEFAULT_API_BASE = isLocalhost ? "http://localhost:8080" : window.location.origin;
-      const DEFAULT_JOBS_BASE = isLocalhost ? "http://localhost:8081" : window.location.origin;
+      const DEFAULT_API_BASE = "http://localhost:8080";
+      const DEFAULT_JOBS_BASE = "http://localhost:8081";
       const queryParams = new URLSearchParams(window.location.search);
       const apiBaseOverride = queryParams.get("apiBase") || window.SNF_API_BASE;
       const jobsBaseOverride = queryParams.get("jobsBase") || window.SNF_JOBS_BASE;
       const API_BASE = apiBaseOverride || DEFAULT_API_BASE;
-      const JOBS_BASE = jobsBaseOverride || DEFAULT_JOBS_BASE;
+      const JOBS_BASE =
+        jobsBaseOverride ||
+        (API_BASE === DEFAULT_API_BASE ? DEFAULT_JOBS_BASE : API_BASE);
       const INGESTION_URL = `${API_BASE.replace(/\/$/, "")}/api/v1/notify`;
       const JOBS_URL = `${JOBS_BASE.replace(/\/$/, "")}/api/v1/jobs`;
 
