@@ -95,15 +95,15 @@
     </div>
 
     <script>
-      const DEFAULT_API_BASE = "http://localhost:8080";
-      const DEFAULT_JOBS_BASE = "http://localhost:8081";
+      // Auto-detect base URL: use current origin in production, localhost in development
+      const isLocalhost = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+      const DEFAULT_API_BASE = isLocalhost ? "http://localhost:8080" : window.location.origin;
+      const DEFAULT_JOBS_BASE = isLocalhost ? "http://localhost:8081" : window.location.origin;
       const queryParams = new URLSearchParams(window.location.search);
       const apiBaseOverride = queryParams.get("apiBase") || window.SNF_API_BASE;
       const jobsBaseOverride = queryParams.get("jobsBase") || window.SNF_JOBS_BASE;
       const API_BASE = apiBaseOverride || DEFAULT_API_BASE;
-      const JOBS_BASE =
-        jobsBaseOverride ||
-        (API_BASE === DEFAULT_API_BASE ? DEFAULT_JOBS_BASE : API_BASE);
+      const JOBS_BASE = jobsBaseOverride || DEFAULT_JOBS_BASE;
       const INGESTION_URL = `${API_BASE.replace(/\/$/, "")}/api/v1/notify`;
       const JOBS_URL = `${JOBS_BASE.replace(/\/$/, "")}/api/v1/jobs`;
 
