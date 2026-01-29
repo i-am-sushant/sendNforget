@@ -1,208 +1,412 @@
 # sendNforget
 
-A distributed notification pipeline with a producer (ingestion-service), a consumer (worker-service), and a simple dashboard UI. RabbitMQ handles messaging and PostgreSQL stores job status.
+> A **distributed notification pipeline** demonstrating microservices architecture, event-driven design, and asynchronous processing with Spring Boot, RabbitMQ, PostgreSQL, and Gmail SMTP.
 
-## Project Structure
+[![Java](https://img.shields.io/badge/Java-21-orange)](https://openjdk.org/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.0-green)](https://spring.io/projects/spring-boot)
+[![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3-orange)](https://www.rabbitmq.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-blue)](https://docs.docker.com/compose/)
+
+---
+
+## 📋 Table of Contents
+
+- [Overview](#-overview)
+- [Architecture](#-architecture)
+- [Tech Stack](#-tech-stack)
+- [Project Structure](#-project-structure)
+- [Getting Started](#-getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Infrastructure Setup](#infrastructure-setup)
+  - [Running the Services](#running-the-services)
+- [API Reference](#-api-reference)
+- [Dashboard](#-dashboard)
+- [Key Technical Concepts](#-key-technical-concepts)
+- [Data Flow](#-data-flow)
+- [Configuration Reference](#-configuration-reference)
+- [Docker & CI/CD](#-docker--cicd)
+- [Production Deployment](#-production-deployment)
+- [Troubleshooting](#-troubleshooting)
+- [Future Enhancements](#-future-enhancements)
+
+---
+
+## 🎯 Overview
+
+**sendNforget** is a fire-and-forget notification system that:
+
+1. **Accepts** notification requests via REST API
+2. **Queues** them asynchronously in RabbitMQ
+3. **Processes** with automatic retry on failure
+4. **Delivers** actual emails via Gmail SMTP
+5. **Tracks** job status in PostgreSQL
+6. **Displays** real-time status in a web dashboard
+
+This project demonstrates production-ready patterns for building scalable, resilient distributed systems.
+
+---
+
+## 🏗️ Architecture
 
 ```
-/infra               Docker Compose for Postgres, RabbitMQ, Redis
-/ingestion-service   Spring Boot producer API (HTTP -> RabbitMQ)
-/worker-service      Spring Boot consumer (RabbitMQ -> Postgres + status API)
-/dashboard           Static HTML/JS dashboard
+┌─────────────┐     HTTP POST      ┌───────────────────┐
+│   Client    │ ─────────────────► │  Ingestion        │
+│  (Dashboard │     202 Accepted   │  Service          │
+│   or API)   │ ◄───────────────── │  (Port 8080)      │
+└─────────────┘                    └────────┬──────────┘
+                                            │ Publish
+                                            ▼
+                               ┌────────────────────────┐
+                               │      RabbitMQ          │
+                               │   snf_tasks_queue      │
+                               │   (Durable Queue)      │
+                               └────────────┬───────────┘
+                                            │ Consume
+                                            ▼
+                               ┌────────────────────────┐
+                               │   Worker Service       │
+                               │   (Port 8081)          │
+                               │                        │
+                               │   • Retry: 3 attempts  │
+                               │   • Backoff: 2s, 4s    │
+                               │   • Email via SMTP     │
+                               └────────┬───────────────┘
+                                        │
+                         ┌──────────────┴────────────────┐
+                         ▼                               ▼
+              ┌─────────────────┐             ┌─────────────────┐
+              │   PostgreSQL    │             │   Gmail SMTP    │
+              │   (job_logs)    │             │   (Delivery)    │
+              └────────┬────────┘             └─────────────────┘
+                       │
+                       │ GET /api/v1/jobs
+                       ▼
+              ┌─────────────────┐
+              │   Dashboard     │
+              │   (Bootstrap 5) │
+              └─────────────────┘
 ```
 
-## Prerequisites
+---
 
-- Java 21
-- Maven 3.9+
-- Docker Desktop (for infra)
+## 🛠️ Tech Stack
 
-## Infrastructure
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Ingestion API** | Spring Boot 4.0, Java 21 | REST API, message producer |
+| **Worker** | Spring Boot 4.0, Spring Data JPA | Message consumer, email sender |
+| **Message Broker** | RabbitMQ 3 | Async messaging, retry handling |
+| **Database** | PostgreSQL 16 | Job status persistence |
+| **Cache** | Redis 7 | Rate limiting (future) |
+| **Email** | Gmail SMTP | Actual email delivery |
+| **Frontend** | HTML5, Bootstrap 5, Vanilla JS | Dashboard UI |
+| **Containerization** | Docker, Docker Compose | Local dev & production |
+| **CI/CD** | GitHub Actions | Build, test, deploy |
 
-Start the local dependencies:
+---
+
+## 📁 Project Structure
 
 ```
+sendNforget/
+├── infra/                          # Infrastructure
+│   ├── docker-compose.yml          # Local dev (Postgres, RabbitMQ, Redis)
+│   └── deploy/
+│       └── docker-compose.yml      # Production deployment
+│
+├── ingestion-service/              # Producer Microservice
+│   ├── Dockerfile
+│   ├── pom.xml
+│   └── src/main/java/com/sendnforget/ingestion/
+│       ├── IngestionServiceApplication.java
+│       ├── config/RabbitConfig.java
+│       ├── controller/IngestionController.java
+│       └── model/NotificationRequest.java
+│
+├── worker-service/                 # Consumer Microservice
+│   ├── Dockerfile
+│   ├── pom.xml
+│   └── src/main/java/com/sendnforget/worker/
+│       ├── WorkerServiceApplication.java
+│       ├── config/RabbitConfig.java
+│       ├── consumer/WorkerConsumer.java
+│       ├── controller/JobStatusController.java
+│       ├── model/
+│       │   ├── JobLog.java
+│       │   └── NotificationRequest.java
+│       └── repository/JobLogRepository.java
+│
+└── dashboard/                      # Frontend
+    └── index.html
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- **Java 21** (JDK)
+- **Maven 3.9+**
+- **Docker Desktop** (for infrastructure)
+
+### Infrastructure Setup
+
+Start PostgreSQL, RabbitMQ, and Redis:
+
+```bash
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-Services exposed:
-- Postgres: localhost:5432 (db: sendnforget, user: admin, pass: password)
-- RabbitMQ: localhost:7673 (AMQP), http://localhost:17673 (UI)
-- Redis: localhost:6379
+**Services exposed:**
 
-## Services
+| Service | Port | Credentials |
+|---------|------|-------------|
+| PostgreSQL | `localhost:5432` | db: `sendnforget`, user: `admin`, pass: `password` |
+| RabbitMQ (AMQP) | `localhost:7673` | user: `guest`, pass: `guest` |
+| RabbitMQ (UI) | `http://localhost:17673` | user: `guest`, pass: `guest` |
+| Redis | `localhost:6379` | - |
 
-### Ingestion Service (Producer)
+### Running the Services
 
-**Location:** ingestion-service
-
-**Config:** [ingestion-service/src/main/resources/application.yml](ingestion-service/src/main/resources/application.yml)
-
-- Port: 8080
-- RabbitMQ host/port: localhost:7673
-
-**Run:**
-
-```
+**Terminal 1 - Ingestion Service:**
+```bash
 cd ingestion-service
 mvn spring-boot:run
 ```
 
-**Endpoint:**
+**Terminal 2 - Worker Service:**
+```bash
+# Set Gmail credentials (required for email delivery)
+export GMAIL_SMTP_USER=your-email@gmail.com
+export GMAIL_SMTP_PASSWORD=your-app-password
 
-- POST http://localhost:8080/api/v1/notify
-
-Example body:
-
-```json
-{
-  "clientId": "c1",
-  "recipient": "user@example.com",
-  "message": "hello"
-}
-```
-
-Returns 202 Accepted with a generated `trackingId`.
-
-### Worker Service (Consumer + DB)
-
-**Location:** worker-service
-
-**Config:** [worker-service/src/main/resources/application.yml](worker-service/src/main/resources/application.yml)
-
-- Port: 8081
-- Postgres: jdbc:postgresql://localhost:5432/sendnforget
-- RabbitMQ: localhost:7673
-- Retry: max attempts 3, initial 2s, multiplier 2
-- Timezone: UTC (for JDBC)
-
-**Run:**
-
-```
 cd worker-service
 mvn spring-boot:run
 ```
 
-**Endpoint:**
+**Terminal 3 - Dashboard:**
+```bash
+# Open in browser or use Live Server
+open dashboard/index.html
+```
 
-- GET http://localhost:8081/api/v1/jobs
+---
 
-Returns all job logs in Postgres. `@CrossOrigin` is enabled so the dashboard can fetch.
+## 📡 API Reference
 
-**Email delivery (Gmail SMTP):**
+### Ingestion Service (Port 8080)
 
-The worker sends real emails using Spring Mail with Gmail SMTP. Configure these env vars:
+#### `POST /api/v1/notify`
 
-- `GMAIL_SMTP_USER` (e.g., your Gmail address)
-- `GMAIL_SMTP_PASSWORD` (app password recommended)
+Submit a notification for async processing.
 
-Email subject template: `[sendNforget][clientId] Notification`.
+**Request:**
+```json
+{
+  "clientId": "acme-corp",
+  "recipient": "user@example.com",
+  "message": "Your order has shipped!"
+}
+```
 
-## Dashboard
+**Response (202 Accepted):**
+```json
+{
+  "trackingId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "QUEUED"
+}
+```
+
+### Worker Service (Port 8081)
+
+#### `GET /api/v1/jobs`
+
+Retrieve all job logs.
+
+**Response:**
+```json
+[
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "status": "SENT",
+    "recipient": "user@example.com",
+    "retryCount": 1,
+    "createdAt": "2026-01-29T10:30:00Z"
+  }
+]
+```
+
+**Status Values:** `PROCESSING` | `SENT` | `FAILED`
+
+---
+
+## 🖥️ Dashboard
 
 **Location:** [dashboard/index.html](dashboard/index.html)
 
-- Bootstrap 5 UI
-- Polls the worker API every 3 seconds
-- Refresh button to manually reload
-- Form to submit notifications to ingestion API (clientId, recipient, message)
+**Features:**
+- Bootstrap 5 responsive UI
+- Auto-refresh every 3 seconds
+- Form to submit test notifications
+- Status badges: 🟢 SENT | 🔴 FAILED | ⚪ PROCESSING
 
-Open the file in a browser.
+**Running locally:** Open the HTML file directly or use VS Code Live Server.
 
-**API base URL overrides:**
+**API Base URL Configuration:**
 
-The dashboard supports same-origin paths when behind a reverse proxy:
+| Environment | Ingestion API | Jobs API |
+|-------------|---------------|----------|
+| Local | `http://localhost:8080` | `http://localhost:8081` |
+| Production | Same origin (`/api/v1/...`) | Same origin |
 
-- Ingestion: `/api/v1/notify`
-- Worker: `/api/v1/jobs`
+Override via query params: `?apiBase=https://...&jobsBase=https://...`
 
-For local development, defaults are:
+---
 
-- Ingestion: `http://localhost:8080`
-- Worker: `http://localhost:8081`
+## 🎓 Key Technical Concepts
 
-Override using query params:
+### 1. Event-Driven Architecture
+The system uses RabbitMQ as a message broker to **decouple** producers from consumers. Services communicate asynchronously through events (messages), enabling independent scaling and deployment.
 
-- `?apiBase=https://your-domain`
-- `?jobsBase=https://your-domain`
+### 2. Fire-and-Forget Pattern
+The API returns `202 Accepted` immediately without waiting for processing. The client receives a `trackingId` to check status later. This pattern maximizes throughput and responsiveness.
 
-You can also set `window.SNF_API_BASE` / `window.SNF_JOBS_BASE` before the script runs (e.g., via a reverse proxy injecting a small script block).
+### 3. Producer-Consumer Pattern
+```
+Ingestion (Producer) → Queue → Worker (Consumer)
+```
+Multiple workers can consume from the same queue for horizontal scaling.
 
-## End-to-End Test
+### 4. Retry with Exponential Backoff
+```yaml
+retry:
+  enabled: true
+  max-attempts: 3
+  initial-interval: 2000ms   # First retry after 2s
+  multiplier: 2.0            # Second retry after 4s
+```
+Prevents overwhelming failing services while recovering from transient errors.
 
-1. Start Docker Compose.
-2. Run ingestion-service.
-3. Run worker-service.
-4. POST a notification to ingestion-service.
-5. Open dashboard and watch the job status update.
+### 5. Message Serialization
+Uses Jackson's `JacksonJsonMessageConverter` for automatic JSON serialization/deserialization of messages.
 
-## Architecture
+### 6. JPA Entity Lifecycle
+Job status transitions: `PROCESSING → SENT` or `PROCESSING → FAILED`
 
-**High-level flow**
+### 7. Multi-Stage Docker Build
+```dockerfile
+FROM maven:3.9-eclipse-temurin-21 AS build  # Build stage
+FROM eclipse-temurin:21-jre                  # Runtime stage (smaller)
+```
 
-Client → Ingestion Service → RabbitMQ → Worker Service → Postgres → Dashboard
+---
 
-**Key behaviors**
-- Ingestion generates `trackingId` and enqueues message.
-- Worker consumes, simulates work, randomly fails (30%) to trigger retry.
-- Job status transitions: PROCESSING → SENT or PROCESSING → FAILED.
+## 🔄 Data Flow
 
-## Troubleshooting
+```
+1. Client POSTs to /api/v1/notify
+   │
+   ▼
+2. Ingestion Service generates trackingId (UUID)
+   │
+   ▼
+3. Message published to RabbitMQ (snf_tasks_queue)
+   │
+   ▼
+4. Worker consumes message
+   │
+   ├── Saves JobLog (status: PROCESSING)
+   ├── Simulates work (2s delay)
+   ├── 30% chance: throws exception → retry
+   ├── Sends email via SMTP
+   └── Updates JobLog (status: SENT/FAILED)
+   │
+   ▼
+5. Dashboard polls GET /api/v1/jobs → displays status
+```
 
-- If worker service fails with timezone errors, ensure JVM timezone is UTC (already set in code) and Postgres is running.
-- If RabbitMQ connection fails, verify Docker Compose is up and port 7673 is mapped.
-- If dashboard shows CORS errors, confirm worker is running and `@CrossOrigin` is present.
+---
 
-## Future Enhancements
+## ⚙️ Configuration Reference
 
-- Dead-letter queue for failed messages after retries.
-- Auth for APIs and dashboard.
-- Redis-backed caching or rate limiting.
-- Observability: logs, metrics, tracing.
+### Ingestion Service (`application.yml`)
 
-## Docker & CI/CD
+| Property | Default | Description |
+|----------|---------|-------------|
+| `server.port` | `8080` | HTTP port |
+| `spring.rabbitmq.host` | `localhost` | RabbitMQ host |
+| `spring.rabbitmq.port` | `7673` | RabbitMQ AMQP port |
 
-Dockerfiles are included for both services:
+### Worker Service (`application.yml`)
 
-- [ingestion-service/Dockerfile](ingestion-service/Dockerfile)
-- [worker-service/Dockerfile](worker-service/Dockerfile)
+| Property | Default | Description |
+|----------|---------|-------------|
+| `server.port` | `8081` | HTTP port |
+| `spring.datasource.url` | `jdbc:postgresql://localhost:5432/sendnforget` | Postgres URL |
+| `spring.rabbitmq.listener.simple.retry.max-attempts` | `3` | Max retry attempts |
+| `spring.mail.host` | `smtp.gmail.com` | SMTP server |
+| `GMAIL_SMTP_USER` | (env var) | Gmail address |
+| `GMAIL_SMTP_PASSWORD` | (env var) | Gmail app password |
 
-GitHub Actions workflows:
+---
 
-- CI (build + test): [.github/workflows/ci.yml](.github/workflows/ci.yml)
-- Docker build & push to GHCR: [.github/workflows/docker.yml](.github/workflows/docker.yml)
+## 🐳 Docker & CI/CD
 
-Images are published to:
+### Dockerfiles
 
-- `ghcr.io/<owner>/<repo>-ingestion-service`
-- `ghcr.io/<owner>/<repo>-worker-service`
+Both services use multi-stage builds:
 
-## DigitalOcean Droplet Deployment (Example)
+| Service | Dockerfile | Image Size |
+|---------|------------|------------|
+| Ingestion | [ingestion-service/Dockerfile](ingestion-service/Dockerfile) | ~200MB |
+| Worker | [worker-service/Dockerfile](worker-service/Dockerfile) | ~200MB |
 
-This deployment assumes Nginx terminates TLS and proxies:
+### GitHub Actions Workflows
 
-- `/api/v1/notify` → `http://127.0.0.1:8080`
-- `/api/v1/jobs` → `http://127.0.0.1:8081`
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| CI | Push/PR to main | Build, test |
+| Docker | Push to main | Build & push images to GHCR |
+| Deploy | Manual | SSH deploy to production |
 
-### Production layout (Droplet)
+### Container Registry
 
-- Production compose file: `/opt/sendnforget/docker-compose.yml` (copy from [infra/deploy/docker-compose.yml](infra/deploy/docker-compose.yml))
-- Production env file: `/opt/sendnforget/.env`
-- Static dashboard: `/var/www/sendnforget/dashboard` (served by Nginx)
+Images published to GitHub Container Registry:
+- `ghcr.io/<owner>/<repo>-ingestion-service:main`
+- `ghcr.io/<owner>/<repo>-worker-service:main`
 
-Local infra for development remains in [infra/docker-compose.yml](infra/docker-compose.yml).
+---
 
-### Server .env keys (production)
+## 🌐 Production Deployment
 
-Only these keys are required in `/opt/sendnforget/.env`:
+### DigitalOcean Droplet Example
 
-- `GHCR_REPOSITORY=<owner>/<repo>`
-- `GMAIL_SMTP_USER=<gmail address>`
-- `GMAIL_SMTP_PASSWORD=<gmail app password>`
+**Architecture:**
+```
+Internet → Nginx (TLS) → localhost:8080 (Ingestion)
+                       → localhost:8081 (Worker)
+                       → /var/www/.../dashboard (Static)
+```
 
-### Production compose example (apps + infra)
+### Production Layout
 
-`/opt/sendnforget/docker-compose.yml` runs Postgres, RabbitMQ, and both app services. Apps are bound to localhost ports for Nginx, while dependencies stay internal to the compose network.
+| Path | Content |
+|------|---------|
+| `/opt/sendnforget/docker-compose.yml` | Production compose |
+| `/opt/sendnforget/.env` | Environment secrets |
+| `/var/www/sendnforget/dashboard` | Static dashboard |
+
+### Environment Variables (`.env`)
+
+```bash
+GHCR_REPOSITORY=owner/repo
+GMAIL_SMTP_USER=your-email@gmail.com
+GMAIL_SMTP_PASSWORD=your-app-password
+```
+
+### Production Compose
 
 ```yaml
 services:
@@ -251,38 +455,51 @@ volumes:
   snf_pg_data:
 ```
 
-### GitHub Actions deploy secrets
+### GitHub Actions Deploy Secrets
 
-Set these secrets in GitHub Actions for the SSH deploy job:
+| Secret | Description |
+|--------|-------------|
+| `DEPLOY_HOST` | Server IP/hostname |
+| `DEPLOY_USER` | SSH username |
+| `DEPLOY_SSH_KEY` | Private SSH key |
+| `DEPLOY_PORT` | SSH port |
+| `DEPLOY_COMPOSE_PATH` | `/opt/sendnforget` |
 
-- `DEPLOY_HOST`
-- `DEPLOY_USER`
-- `DEPLOY_SSH_KEY`
-- `DEPLOY_PORT`
-- `DEPLOY_COMPOSE_PATH` (set to `/opt/sendnforget`)
+### Deploy Commands
 
-### Deploy flow
+`ash
+docker compose pull
+docker compose up -d
+`
 
-The deploy workflow is manual-only (run it via GitHub Actions → “Run workflow”).
+---
 
-Inputs:
+## 🔧 Troubleshooting
 
-- `deploy_dashboard` (default: false) — syncs the static dashboard to `/var/www/sendnforget/dashboard`.
-- `clean_repo` (default: false) — runs `git clean -fd` after resetting the repo.
+| Issue | Solution |
+|-------|----------|
+| Worker timezone errors | JVM timezone is set to UTC in code; ensure Postgres is running |
+| RabbitMQ connection refused | Verify Docker Compose is up and port 7673 is mapped |
+| Dashboard CORS errors | Confirm worker is running and `@CrossOrigin` is present |
+| Email not sending | Check `GMAIL_SMTP_USER` and `GMAIL_SMTP_PASSWORD` env vars |
+| Port conflicts | Ensure ports 5432, 7673, 8080, 8081 are not in use |
 
-When `deploy_dashboard` or `clean_repo` is true, the droplet keeps a public HTTPS clone at `/opt/sendnforget/repo` and runs:
+---
 
-- `git fetch origin main`
-- `git reset --hard origin/main`
-- (optional) `git clean -fd`
+## 🔮 Future Enhancements
 
-When `deploy_dashboard` is true, it also runs:
+| Feature | Description | Tech |
+|---------|-------------|------|
+| **Rate Limiting** | 5 requests/min per clientId | Redis |
+| **Idempotency** | Deduplicate by requestId | Redis + TTL |
+| **Priority Queues** | VIP treatment for urgent messages | RabbitMQ priority |
+| **Search & Filter** | Find jobs by recipient/status | JPA queries |
+| **Dead-Letter Queue** | Handle permanent failures | RabbitMQ DLX |
+| **Authentication** | API key or JWT | Spring Security |
+| **Observability** | Logs, metrics, tracing | Prometheus, Grafana, Zipkin |
 
-- `rsync -av --delete /opt/sendnforget/repo/dashboard/ /var/www/sendnforget/dashboard/`
+---
 
-Containers are always deployed after image build/push:
+## 📜 License
 
-- `docker compose pull`
-- `docker compose up -d`
-
-No GHCR login is required because the images are public.
+This project is licensed under the terms in the [LICENSE](LICENSE) file.
