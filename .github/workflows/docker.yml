@@ -1,9 +1,18 @@
 name: Docker Build & Push
 
 "on":
-  push:
-    branches: ["main"]
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      deploy_dashboard:
+        description: "Sync dashboard to /var/www/sendnforget/dashboard"
+        required: false
+        type: boolean
+        default: false
+      clean_repo:
+        description: "Run git clean -fd after reset"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -65,3 +74,37 @@ jobs:
           push: true
           tags: ${{ steps.meta_worker.outputs.tags }}
           labels: ${{ steps.meta_worker.outputs.labels }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Deploy to droplet
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          script: |
+            if [ "${{ inputs.deploy_dashboard }}" = "true" ] || [ "${{ inputs.clean_repo }}" = "true" ]; then
+              if [ ! -d /opt/sendnforget/repo/.git ]; then
+                git clone https://github.com/${{ github.repository }}.git /opt/sendnforget/repo
+              fi
+
+              cd /opt/sendnforget/repo
+              git fetch origin main
+              git reset --hard origin/main
+
+              if [ "${{ inputs.clean_repo }}" = "true" ]; then
+                git clean -fd
+              fi
+            fi
+
+            if [ "${{ inputs.deploy_dashboard }}" = "true" ]; then
+              rsync -av --delete /opt/sendnforget/repo/dashboard/ /var/www/sendnforget/dashboard/
+            fi
+
+            cd /opt/sendnforget
+            docker compose pull
+            docker compose up -d

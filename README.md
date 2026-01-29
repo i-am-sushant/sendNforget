@@ -179,26 +179,110 @@ Images are published to:
 
 ## DigitalOcean Droplet Deployment (Example)
 
-1. Create a Docker-enabled droplet and install Docker + Docker Compose.
-2. Log in to GHCR on the droplet:
+This deployment assumes Nginx terminates TLS and proxies:
 
-  - `echo $GITHUB_TOKEN | docker login ghcr.io -u <github-username> --password-stdin`
+- `/api/v1/notify` → `http://127.0.0.1:8080`
+- `/api/v1/jobs` → `http://127.0.0.1:8081`
 
-3. Pull the images:
+### Production layout (Droplet)
 
-  - `docker pull ghcr.io/<owner>/<repo>-ingestion-service:latest`
-  - `docker pull ghcr.io/<owner>/<repo>-worker-service:latest`
+- Production compose file: `/opt/sendnforget/docker-compose.yml` (copy from [infra/deploy/docker-compose.yml](infra/deploy/docker-compose.yml))
+- Production env file: `/opt/sendnforget/.env`
+- Static dashboard: `/var/www/sendnforget/dashboard` (served by Nginx)
 
-4. Start infra (Postgres + RabbitMQ) using [infra/docker-compose.yml](infra/docker-compose.yml).
-5. Run services with env vars, e.g.:
+Local infra for development remains in [infra/docker-compose.yml](infra/docker-compose.yml).
 
-  - `GMAIL_SMTP_USER=...`
-  - `GMAIL_SMTP_PASSWORD=...`
-  - `SPRING_DATASOURCE_URL=jdbc:postgresql://<db-host>:5432/sendnforget`
-  - `SPRING_RABBITMQ_HOST=<rabbit-host>`
+### Server .env keys (production)
 
-6. Put a reverse proxy (e.g., Nginx) in front so:
+Only these keys are required in `/opt/sendnforget/.env`:
 
-  - `/` serves the dashboard
-  - `/api/v1/notify` routes to ingestion-service
-  - `/api/v1/jobs` routes to worker-service
+- `GHCR_REPOSITORY=<owner>/<repo>`
+- `GMAIL_SMTP_USER=<gmail address>`
+- `GMAIL_SMTP_PASSWORD=<gmail app password>`
+
+### Production compose example (apps + infra)
+
+`/opt/sendnforget/docker-compose.yml` runs Postgres, RabbitMQ, and both app services. Apps are bound to localhost ports for Nginx, while dependencies stay internal to the compose network.
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: sendnforget
+    volumes:
+      - snf_pg_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  ingestion-service:
+    image: ghcr.io/${GHCR_REPOSITORY}-ingestion-service:latest
+    depends_on:
+      - rabbitmq
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+
+  worker-service:
+    image: ghcr.io/${GHCR_REPOSITORY}-worker-service:latest
+    depends_on:
+      - postgres
+      - rabbitmq
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sendnforget
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: password
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      GMAIL_SMTP_USER: ${GMAIL_SMTP_USER}
+      GMAIL_SMTP_PASSWORD: ${GMAIL_SMTP_PASSWORD}
+
+volumes:
+  snf_pg_data:
+```
+
+### GitHub Actions deploy secrets
+
+Set these secrets in GitHub Actions for the SSH deploy job:
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PORT`
+- `DEPLOY_COMPOSE_PATH` (set to `/opt/sendnforget`)
+
+### Deploy flow
+
+The deploy workflow is manual-only (run it via GitHub Actions → “Run workflow”).
+
+Inputs:
+
+- `deploy_dashboard` (default: false) — syncs the static dashboard to `/var/www/sendnforget/dashboard`.
+- `clean_repo` (default: false) — runs `git clean -fd` after resetting the repo.
+
+When `deploy_dashboard` or `clean_repo` is true, the droplet keeps a public HTTPS clone at `/opt/sendnforget/repo` and runs:
+
+- `git fetch origin main`
+- `git reset --hard origin/main`
+- (optional) `git clean -fd`
+
+When `deploy_dashboard` is true, it also runs:
+
+- `rsync -av --delete /opt/sendnforget/repo/dashboard/ /var/www/sendnforget/dashboard/`
+
+Containers are always deployed after image build/push:
+
+- `docker compose pull`
+- `docker compose up -d`
+
+No GHCR login is required because the images are public.

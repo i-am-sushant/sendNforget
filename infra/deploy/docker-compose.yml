@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: sendnforget
+    volumes:
+      - snf_pg_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  ingestion-service:
+    image: ghcr.io/${GHCR_REPOSITORY}-ingestion-service:latest
+    depends_on:
+      - rabbitmq
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+
+  worker-service:
+    image: ghcr.io/${GHCR_REPOSITORY}-worker-service:latest
+    depends_on:
+      - postgres
+      - rabbitmq
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sendnforget
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: password
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      GMAIL_SMTP_USER: ${GMAIL_SMTP_USER}
+      GMAIL_SMTP_PASSWORD: ${GMAIL_SMTP_PASSWORD}
+
+volumes:
+  snf_pg_data:
